@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  broker:
+    build:
+      context: .
+      dockerfile: broker/Dockerfile
+    ports:
+      - "5555:5555"
+      - "5556:5556"
+
+  server1:
+    build:
+      context: .
+      dockerfile: server-python/Dockerfile
+    environment:
+      - SERVER_NAME=srv1
+      - BROKER_URL=tcp://broker:5556
+      - DATA_FILE=/data/state.json
+    volumes:
+      - server1_data:/data
+    depends_on:
+      - broker
+
+  server2:
+    build:
+      context: .
+      dockerfile: server-python/Dockerfile
+    environment:
+      - SERVER_NAME=srv2
+      - BROKER_URL=tcp://broker:5556
+      - DATA_FILE=/data/state.json
+    volumes:
+      - server2_data:/data
+    depends_on:
+      - broker
+
+  client_alfa:
+    build:
+      context: .
+      dockerfile: client-java/Dockerfile
+    environment:
+      - BOT_NAME=bot_alfa
+      - BROKER_URL=tcp://broker:5555
+      - CHANNELS_TO_CREATE=#geral,#projeto
+    depends_on:
+      - server1
+      - server2
+
+  client_beta:
+    build:
+      context: .
+      dockerfile: client-java/Dockerfile
+    environment:
+      - BOT_NAME=bot_beta
+      - BROKER_URL=tcp://broker:5555
+      - CHANNELS_TO_CREATE=#backend,#geral
+    depends_on:
+      - server1
+      - server2
+
+volumes:
+  server1_data:
+  server2_data:
