@@ -14,6 +14,11 @@ Na **Parte 2**, o projeto foi expandido para incluir:
 - recebimento de mensagens por meio do padrão Publisher-Subscriber
 - persistência das publicações realizadas pelos usuários
 
+Na **Parte 3**, o projeto adicionou:
+- relógios lógicos em todas as mensagens
+- serviço de referência para rank e heartbeat dos servidores
+- sincronização de relógio físico entre servidores utilizando offsets calculados através do heartbeat
+
 O projeto foi desenvolvido com:
 - **clientes em Java**
 - **servidores em Python**
@@ -247,6 +252,7 @@ docker compose up --build
 4. O Docker irá criar as imagens e iniciar:
 - o broker Req/Rep
 - o proxy Pub/Sub
+- o serviço de referência
 - os dois servidores
 - os dois clientes
 
@@ -260,6 +266,7 @@ A aplicação sobe os seguintes containers:
 - `pubsub`: proxy do fluxo Pub/Sub
 - `server1`: primeiro servidor Python
 - `server2`: segundo servidor Python
+- `reference`: serviço de referência
 - `client_alfa`: primeiro bot cliente Java
 - `client_beta`: segundo bot cliente Java
 
@@ -273,5 +280,10 @@ A Parte 2 ampliou essa base com o uso do padrão Publisher-Subscriber, permitind
 - publicação de mensagens
 - recebimento assíncrono das publicações
 - persistência das mensagens publicadas
+
+A Parte 3 integrou mecanismos de sincronização distribuída, incluindo:
+- relógio lógico implementado em todas as mensagens tanto por clientes quanto servidores;
+- um novo serviço de referência para fornecer _ranks_
+- sistema de tolerância a falhas via _heartbeat_ e atualização de offsets para sincronizar o relógio físico dos servidores.
 
 Com isso, o projeto passa a atender aos requisitos centrais desta etapa, mantendo a comunicação distribuída entre múltiplos processos e a execução automatizada por bots.

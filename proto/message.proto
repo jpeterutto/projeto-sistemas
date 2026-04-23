@@ -20,8 +20,15 @@ message Message {
         PUBLISH_MESSAGE_REQ = 8;
         PUBLISH_MESSAGE_REP = 9;
         CHANNEL_MESSAGE_EVENT = 10;
+        SERVER_RANK_REQ = 11;
+        SERVER_RANK_REP = 12;
+        HEARTBEAT_REQ = 13;
+        HEARTBEAT_REP = 14;
+        SERVER_LIST_REQ = 15;
+        SERVER_LIST_REP = 16;
     }
     Type type = 3;
+    uint32 logical_clock = 20;
 
     message LoginRequest {
         string username = 1;
@@ -69,6 +76,33 @@ message Message {
         string sender = 3;
     }
 
+    message ServerRankRequest {
+        string server_name = 1;
+    }
+
+    message ServerRankResponse {
+        int32 rank = 1;
+    }
+
+    message HeartbeatRequest {
+    }
+
+    message HeartbeatResponse {
+        string reference_time = 1;
+    }
+
+    message ServerInfo {
+        string name = 1;
+        int32 rank = 2;
+    }
+
+    message ServerListRequest {
+    }
+
+    message ServerListResponse {
+        repeated ServerInfo servers = 1;
+    }
+
     oneof payload {
         LoginRequest login_req = 4;
         LoginResponse login_rep = 5;
@@ -80,5 +114,11 @@ message Message {
         PublishMessageRequest pub_req = 11;
         PublishMessageResponse pub_rep = 12;
         ChannelMessageEvent channel_event = 13;
+        ServerRankRequest rank_req = 14;
+        ServerRankResponse rank_rep = 15;
+        HeartbeatRequest hb_req = 16;
+        HeartbeatResponse hb_rep = 17;
+        ServerListRequest srv_list_req = 18;
+        ServerListResponse srv_list_rep = 19;
     }
 }

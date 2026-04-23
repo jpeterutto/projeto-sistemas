@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ClientBot {
     private static final String SENDER = System.getenv("BOT_NAME") != null ? System.getenv("BOT_NAME") : "bot_default";
@@ -18,6 +19,28 @@ public class ClientBot {
     private static final String PUBSUB_URL = System.getenv("PUBSUB_URL") != null ? System.getenv("PUBSUB_URL") : "tcp://pubsub:5558";
 
     private static CopyOnWriteArrayList<String> subscribedChannels = new CopyOnWriteArrayList<>();
+    
+    // Logical Clock State
+    private static AtomicInteger logicalClock = new AtomicInteger(0);
+
+    public static synchronized void onReceiveLogicalClock(int received) {
+        int local = logicalClock.get();
+        if (received > local) {
+            logicalClock.set(received);
+        }
+    }
+
+    public static synchronized int beforeSendLogicalClock() {
+        return logicalClock.incrementAndGet();
+    }
+
+    private static Message.Builder newBaseMessage(Type type) {
+        return Message.newBuilder()
+            .setType(type)
+            .setTimestamp(Instant.now().toString())
+            .setSender(SENDER)
+            .setLogicalClock(beforeSendLogicalClock());
+    }
 
     public static void main(String[] args) {
         System.out.println("Iniciando client: " + SENDER);
@@ -41,10 +64,11 @@ public class ClientBot {
                         byte[] payload = subSocket.recv(0);
                         try {
                             Message evt = Message.parseFrom(payload);
+                            onReceiveLogicalClock(evt.getLogicalClock());
                             if (evt.getType() == Type.CHANNEL_MESSAGE_EVENT) {
                                 String ts = Instant.now().toString();
-                                System.out.printf("[%s] CLIENT %s | RECEBIDA >> Canal: %s | Por: %s | Texto: '%s' | [TsEnvio: %s] | [TsRecebimento: %s]%n", 
-                                    ts, SENDER, evt.getChannelEvent().getChannelName(), evt.getChannelEvent().getSender(), evt.getChannelEvent().getText(), evt.getTimestamp(), ts);
+                                System.out.printf("[%s] CLIENT %s | RECEBIDA >> Canal: %s | Por: %s | Texto: '%s' | [TsEnvio: %s] | lc_msg=%d | lc_local_agora=%d%n", 
+                                    ts, SENDER, evt.getChannelEvent().getChannelName(), evt.getChannelEvent().getSender(), evt.getChannelEvent().getText(), evt.getTimestamp(), evt.getLogicalClock(), logicalClock.get());
                             }
                         } catch(Exception e) { e.printStackTrace(); }
                     } else {
@@ -64,22 +88,20 @@ public class ClientBot {
             
             boolean loggedIn = false;
             while (!loggedIn) {
-                Message loginReq = Message.newBuilder()
-                    .setType(Type.LOGIN_REQ)
-                    .setTimestamp(Instant.now().toString())
-                    .setSender(SENDER)
+                Message loginReq = newBaseMessage(Type.LOGIN_REQ)
                     .setLoginReq(Message.LoginRequest.newBuilder().setUsername(SENDER).build())
                     .build();
                 
-                logMessage("out", "broker", "LOGIN_REQ", "user=" + SENDER, "");
+                logMessageOut("broker", "LOGIN_REQ", "user=" + SENDER, loginReq.getLogicalClock());
                 socket.send(loginReq.toByteArray(), 0);
                 
                 byte[] reply = socket.recv(0);
                 Message repMessage = Message.parseFrom(reply);
+                onReceiveLogicalClock(repMessage.getLogicalClock());
                 
                 boolean success = repMessage.getLoginRep().getSuccess();
                 String resultStr = success ? "OK" : "ERROR";
-                logMessage("in", repMessage.getSender(), "LOGIN_REP", "status=" + resultStr, resultStr);
+                logMessageIn(repMessage.getSender(), "LOGIN_REP", "status=" + resultStr, resultStr, repMessage.getLogicalClock());
                 
                 if (success) {
                     loggedIn = true;
@@ -90,37 +112,35 @@ public class ClientBot {
             }
             
             while (true) {
-                Message listReq = Message.newBuilder()
-                    .setType(Type.LIST_CHANNELS_REQ)
-                    .setTimestamp(Instant.now().toString())
-                    .setSender(SENDER)
+                Message listReq = newBaseMessage(Type.LIST_CHANNELS_REQ)
                     .setListReq(Message.ListChannelsRequest.newBuilder().build())
                     .build();
                 
-                logMessage("out", "broker", "LIST_CHANNELS_REQ", "", "");
+                logMessageOut("broker", "LIST_CHANNELS_REQ", "", listReq.getLogicalClock());
                 socket.send(listReq.toByteArray(), 0);
                 
                 byte[] listReply = socket.recv(0);
                 Message listRepMessage = Message.parseFrom(listReply);
+                onReceiveLogicalClock(listRepMessage.getLogicalClock());
+                
                 List<String> availableChannels = new ArrayList<>(listRepMessage.getListRep().getChannelsList());
-                logMessage("in", listRepMessage.getSender(), "LIST_CHANNELS_REP", "channels=" + availableChannels, "OK");
+                logMessageIn(listRepMessage.getSender(), "LIST_CHANNELS_REP", "channels=" + availableChannels, "OK", listRepMessage.getLogicalClock());
                 
                 if (availableChannels.size() < 5) {
                     String newChName = "#bot_canal_" + Instant.now().toEpochMilli();
-                    Message createReq = Message.newBuilder()
-                        .setType(Type.CREATE_CHANNEL_REQ)
-                        .setTimestamp(Instant.now().toString())
-                        .setSender(SENDER)
+                    Message createReq = newBaseMessage(Type.CREATE_CHANNEL_REQ)
                         .setCreateReq(Message.CreateChannelRequest.newBuilder().setChannelName(newChName).build())
                         .build();
                     
-                    logMessage("out", "broker", "CREATE_CHANNEL_REQ", "channel=" + newChName, "");
+                    logMessageOut("broker", "CREATE_CHANNEL_REQ", "channel=" + newChName, createReq.getLogicalClock());
                     socket.send(createReq.toByteArray(), 0);
                     
                     byte[] createReply = socket.recv(0);
                     Message createRepMessage = Message.parseFrom(createReply);
+                    onReceiveLogicalClock(createRepMessage.getLogicalClock());
+                    
                     boolean success = createRepMessage.getCreateRep().getSuccess();
-                    logMessage("in", createRepMessage.getSender(), "CREATE_CHANNEL_REP", "channel=" + newChName, success ? "OK" : "ERROR");
+                    logMessageIn(createRepMessage.getSender(), "CREATE_CHANNEL_REP", "channel=" + newChName, success ? "OK" : "ERROR", createRepMessage.getLogicalClock());
                     if (success) {
                         availableChannels.add(newChName);
                     }
@@ -145,21 +165,20 @@ public class ClientBot {
                 
                 if (targetChannel != null) {
                     for (int i=1; i<=10; i++) {
-                        String text = "Msg automatica (ciclo P2) msg " + i + " de " + SENDER;
-                        Message pubReq = Message.newBuilder()
-                            .setType(Type.PUBLISH_MESSAGE_REQ)
-                            .setTimestamp(Instant.now().toString())
-                            .setSender(SENDER)
+                        String text = "Msg automatica (ciclo P3) msg " + i + " de " + SENDER;
+                        Message pubReq = newBaseMessage(Type.PUBLISH_MESSAGE_REQ)
                             .setPubReq(Message.PublishMessageRequest.newBuilder().setChannelName(targetChannel).setText(text).build())
                             .build();
                             
-                        logMessage("out", "broker", "PUBLISH_MESSAGE_REQ", "channel=" + targetChannel, "");
+                        logMessageOut("broker", "PUBLISH_MESSAGE_REQ", "channel=" + targetChannel, pubReq.getLogicalClock());
                         socket.send(pubReq.toByteArray(), 0);
                         
                         byte[] pubReply = socket.recv(0);
                         Message pubRepMessage = Message.parseFrom(pubReply);
+                        onReceiveLogicalClock(pubRepMessage.getLogicalClock());
+                        
                         boolean ok = pubRepMessage.getPubRep().getSuccess();
-                        logMessage("in", pubRepMessage.getSender(), "PUBLISH_MESSAGE_REP", "channel=" + targetChannel, ok ? "OK" : "ERROR");
+                        logMessageIn(pubRepMessage.getSender(), "PUBLISH_MESSAGE_REP", "channel=" + targetChannel, ok ? "OK" : "ERROR", pubRepMessage.getLogicalClock());
                         
                         try { Thread.sleep(1000); } catch(Exception e) {}
                     }
@@ -172,13 +191,15 @@ public class ClientBot {
         }
     }
 
-    private static void logMessage(String direction, String target, String msgType, String content, String result) {
+    private static void logMessageIn(String target, String msgType, String content, String result, int msgLc) {
         String ts = Instant.now().toString();
         String resStr = result.isEmpty() ? "" : " | result=" + result;
-        if (direction.equals("in")) {
-            System.out.printf("[%s] SERVER %s -> CLIENT %s | %s | %s%s%n", ts, target, SENDER, msgType, content, resStr);
-        } else {
-            System.out.printf("[%s] CLIENT %s -> SERVER %s | %s | %s%s%n", ts, SENDER, target, msgType, content, resStr);
-        }
+        System.out.printf("[%s] SERVER %s -> CLIENT %s | %s | %s%s | lc_msg=%d | lc_local_agora=%d%n", ts, target, SENDER, msgType, content, resStr, msgLc, logicalClock.get());
+    }
+
+    private static void logMessageOut(String target, String msgType, String content, int msgLc) {
+        String ts = Instant.now().toString();
+        System.out.printf("[%s] CLIENT %s -> SERVER %s | %s | %s | lc_enviado=%d%n", ts, SENDER, target, msgType, content, msgLc);
     }
 }
+

@@ -21,6 +21,13 @@ services:
       - "5557:5557"
       - "5558:5558"
 
+  reference:
+    build:
+      context: .
+      dockerfile: reference/Dockerfile
+    ports:
+      - "5560:5560"
+
   server1:
     build:
       context: .
@@ -30,12 +37,14 @@ services:
       - BROKER_URL=tcp://broker:5556
       - PUB_URL=tcp://pubsub:5557
       - SUB_URL=tcp://pubsub:5558
+      - REFERENCE_URL=tcp://reference:5560
       - DATA_FILE=/data/state.json
     volumes:
       - server1_data:/data
     depends_on:
       - broker
       - pubsub
+      - reference
 
   server2:
     build:
@@ -46,12 +55,14 @@ services:
       - BROKER_URL=tcp://broker:5556
       - PUB_URL=tcp://pubsub:5557
       - SUB_URL=tcp://pubsub:5558
+      - REFERENCE_URL=tcp://reference:5560
       - DATA_FILE=/data/state.json
     volumes:
       - server2_data:/data
     depends_on:
       - broker
       - pubsub
+      - reference
 
   client_alfa:
     build:
