@@ -56,7 +56,8 @@ def handle_request(raw_msg):
         print(f"[{datetime.datetime.now().isoformat()}] HEARTBEAT recebido de {client_name} | lc_msg={req.logical_clock} | log_local_agora={logical_clock}")
         
         rep.type = message_pb2.Message.HEARTBEAT_REP
-        rep.hb_rep.reference_time = datetime.datetime.now().isoformat()
+        # Não devolver mais a hora no heartbeat
+        # rep.hb_rep.reference_time = datetime.datetime.now().isoformat()
         
     elif req.type == message_pb2.Message.SERVER_LIST_REQ:
         print(f"[{datetime.datetime.now().isoformat()}] LIST_REQ recebido de {client_name} | lc_msg={req.logical_clock} | log_local_agora={logical_clock}")

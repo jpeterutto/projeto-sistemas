@@ -26,6 +26,11 @@ message Message {
         HEARTBEAT_REP = 14;
         SERVER_LIST_REQ = 15;
         SERVER_LIST_REP = 16;
+        ELECTION_REQ = 17;
+        ELECTION_REP = 18;
+        CLOCK_SYNC_REQ = 19;
+        CLOCK_SYNC_REP = 20;
+        COORDINATOR_ANNOUNCEMENT = 21;
     }
     Type type = 3;
     uint32 logical_clock = 20;
@@ -103,6 +108,25 @@ message Message {
         repeated ServerInfo servers = 1;
     }
 
+    message ElectionRequest {
+        int32 rank = 1;
+    }
+
+    message ElectionResponse {
+        bool ok = 1;
+    }
+
+    message ClockSyncRequest {
+    }
+
+    message ClockSyncResponse {
+        string current_time = 1;
+    }
+
+    message CoordinatorAnnouncement {
+        string coordinator_name = 1;
+    }
+
     oneof payload {
         LoginRequest login_req = 4;
         LoginResponse login_rep = 5;
@@ -120,5 +144,10 @@ message Message {
         HeartbeatResponse hb_rep = 17;
         ServerListRequest srv_list_req = 18;
         ServerListResponse srv_list_rep = 19;
+        ElectionRequest election_req = 25;
+        ElectionResponse election_rep = 26;
+        ClockSyncRequest clock_sync_req = 27;
+        ClockSyncResponse clock_sync_rep = 28;
+        CoordinatorAnnouncement coord_announcement = 29;
     }
 }
