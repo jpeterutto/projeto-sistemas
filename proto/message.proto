@@ -7,7 +7,7 @@ option java_outer_classname = "ChatProtos";
 message Message {
     string timestamp = 1;
     string sender = 2;
-    
+
     enum Type {
         UNKNOWN = 0;
         LOGIN_REQ = 1;
@@ -31,7 +31,13 @@ message Message {
         CLOCK_SYNC_REQ = 19;
         CLOCK_SYNC_REP = 20;
         COORDINATOR_ANNOUNCEMENT = 21;
+
+        REPLICATE_LOGIN_EVENT = 22;
+        REPLICATE_PUBLICATION_EVENT = 23;
+        STATE_SYNC_REQ = 24;
+        STATE_SYNC_REP = 25;
     }
+
     Type type = 3;
     uint32 logical_clock = 20;
 
@@ -53,16 +59,16 @@ message Message {
         string error_message = 2;
     }
 
-    message ListChannelsRequest {
-    }
+    message ListChannelsRequest {}
 
     message ListChannelsResponse {
         repeated string channels = 1;
     }
 
     message ReplicateChannelEvent {
-        string channel_name = 1;
-        string source_server_id = 2;
+        string event_id = 1;
+        string channel_name = 2;
+        string source_server_id = 3;
     }
 
     message PublishMessageRequest {
@@ -89,8 +95,7 @@ message Message {
         int32 rank = 1;
     }
 
-    message HeartbeatRequest {
-    }
+    message HeartbeatRequest {}
 
     message HeartbeatResponse {
         string reference_time = 1;
@@ -101,8 +106,7 @@ message Message {
         int32 rank = 2;
     }
 
-    message ServerListRequest {
-    }
+    message ServerListRequest {}
 
     message ServerListResponse {
         repeated ServerInfo servers = 1;
@@ -116,8 +120,7 @@ message Message {
         bool ok = 1;
     }
 
-    message ClockSyncRequest {
-    }
+    message ClockSyncRequest {}
 
     message ClockSyncResponse {
         string current_time = 1;
@@ -125,6 +128,29 @@ message Message {
 
     message CoordinatorAnnouncement {
         string coordinator_name = 1;
+    }
+
+    message ReplicateLoginEvent {
+        string event_id = 1;
+        string username = 2;
+        string login_timestamp = 3;
+        string source_server_id = 4;
+    }
+
+    message ReplicatePublicationEvent {
+        string event_id = 1;
+        string channel_name = 2;
+        string original_sender = 3;
+        string text = 4;
+        string timestamp_sent = 5;
+        string timestamp_persisted = 6;
+        string source_server_id = 7;
+    }
+
+    message StateSyncRequest {}
+
+    message StateSyncResponse {
+        string state_json = 1;
     }
 
     oneof payload {
@@ -149,5 +175,10 @@ message Message {
         ClockSyncRequest clock_sync_req = 27;
         ClockSyncResponse clock_sync_rep = 28;
         CoordinatorAnnouncement coord_announcement = 29;
+
+        ReplicateLoginEvent replicate_login_event = 30;
+        ReplicatePublicationEvent replicate_publication_event = 31;
+        StateSyncRequest state_sync_req = 32;
+        StateSyncResponse state_sync_rep = 33;
     }
 }

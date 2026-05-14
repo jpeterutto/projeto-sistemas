@@ -1,4 +1,4 @@
-# Entrega 3 - Sistema de Mensagens Distribuído
+# Entrega 5 - Sistema de Mensagens Distribuído
 
 ## 1. Introdução do Projeto
 Este projeto implementa um sistema distribuído de mensagens instantâneas inspirado em serviços como BBS e IRC, utilizando ZeroMQ para comunicação entre os componentes e Protocol Buffers para serialização binária das mensagens.
@@ -20,6 +20,10 @@ Na **Parte 3**, o sistema foi evoluído para incluir:
 - um serviço de referência para rank e lista de servidores;
 - heartbeat para monitoramento da disponibilidade dos servidores;
 - sincronização do relógio físico dos servidores por meio de offset em nível de aplicação.
+
+Na **Parte 4**, a sincronização do relógio foi modificada para usar um **servidor coordenador**, escolhido por eleição, permitindo que os demais servidores atualizem seus relógios a partir dele.
+
+Na **Parte 5**, foi implementada a **replicação dos dados persistidos**, garantindo que todos os servidores mantenham cópia completa do histórico de logins, canais e publicações.
 
 O projeto foi desenvolvido com:
 - **clientes em Java**;
@@ -81,8 +85,9 @@ Esse serviço se comunica apenas com os servidores e é responsável por:
 - manter o cadastro de servidores;
 - fornecer a lista de servidores disponíveis;
 - receber mensagens de heartbeat;
-- remover servidores indisponíveis da lista;
-- devolver a hora de referência usada na sincronização do relógio físico dos servidores.
+- remover servidores indisponíveis da lista.
+
+A partir da Parte 4, esse serviço deixou de ser usado para sincronização da hora, permanecendo apenas com as responsabilidades de rank, heartbeat e controle de disponibilidade.
 
 ### 2.6. Persistência
 Cada servidor mantém seu próprio arquivo local `state.json`, associado a um volume separado do Docker.
@@ -110,6 +115,39 @@ Com isso, os servidores mantêm seus arquivos separados, mas continuam com uma v
 ### 2.8. Biblioteca Python
 Na implementação em Python foi utilizada a biblioteca **pyzmq**, que é a forma correta de uso do ZeroMQ nesse ambiente.
 
+### 2.9. Método de Replicação e Consistência
+Na Parte 5, foi implementado um mecanismo de replicação para garantir que todos os servidores mantenham cópia dos dados persistidos pelo sistema.
+
+O método escolhido foi uma **replicação ativa com propagação imediata de atualizações**, complementada por uma **sincronização completa de estado no momento em que um servidor entra no sistema**.
+
+#### Como o método resolve o problema do projeto
+O broker da aplicação distribui as requisições entre os servidores em round-robin. Por isso, sem replicação, cada servidor acabaria armazenando apenas parte do histórico de logins, canais e publicações. Se um servidor fosse interrompido, essa parcela do histórico seria perdida. Além disso, qualquer consulta feita a um único servidor retornaria apenas os dados locais daquele nó.
+
+Com a replicação implementada, toda alteração persistente feita em um servidor também é enviada aos demais, garantindo que todos mantenham o mesmo conjunto de dados.
+
+#### Como foi implementado
+A implementação foi dividida em duas partes:
+
+1. **Replicação imediata dos eventos**
+   - sempre que um servidor registra um login, cria um canal ou persiste uma publicação, ele:
+     - salva localmente;
+     - gera um evento interno de replicação;
+     - publica esse evento no tópico interno `__INTERNAL__`;
+     - os demais servidores recebem esse evento e aplicam a mesma alteração em seus próprios arquivos `state.json`.
+
+2. **Sincronização de estado no startup**
+   - quando um servidor inicia, ele solicita a outro servidor ativo uma cópia completa do estado atual;
+   - ao receber esse estado, faz o merge dos canais, logins e publicações que ainda não possuía;
+   - isso permite recuperar atualizações perdidas caso o servidor tenha ficado indisponível temporariamente.
+
+#### Controle de duplicidade
+Para evitar que o mesmo evento seja aplicado mais de uma vez, cada alteração replicada recebe um `event_id`. Os servidores mantêm uma lista de identificadores já processados, o que torna a aplicação dos eventos idempotente.
+
+#### Adaptação do método ao projeto
+Na teoria, mecanismos de replicação frequentemente usam confirmações explícitas entre réplicas. Neste projeto, a solução foi adaptada para a arquitetura já existente, aproveitando o canal interno Pub/Sub entre servidores para propagar as alterações de forma simples e compatível com o restante da aplicação.
+
+Como complemento, foi adicionada a sincronização completa de estado no startup para reduzir o risco de inconsistência caso algum servidor reinicie depois de perder eventos anteriores.
+
 ---
 
 ## 3. Funcionalidades Implementadas
@@ -123,6 +161,8 @@ Cada login bem-sucedido é persistido com:
 - nome do usuário;
 - timestamp;
 - identificação do servidor responsável.
+
+A partir da Parte 5, os logins também passam a ser replicados para os demais servidores.
 
 ### 3.2. Listagem de canais
 O cliente pode solicitar ao servidor a lista de canais disponíveis.
@@ -156,6 +196,8 @@ O servidor:
 4. publica a mensagem no tópico correspondente;
 5. responde ao cliente com status de sucesso ou erro.
 
+Na Parte 5, as publicações persistidas também passam a ser replicadas aos demais servidores.
+
 ### 3.6. Recebimento de mensagens
 Os clientes inscritos recebem as mensagens publicadas nos canais aos quais assinaram.
 
@@ -187,20 +229,33 @@ Além disso, os servidores podem solicitar ao serviço de referência a lista de
 ### 3.9. Heartbeat
 Cada servidor envia mensagens periódicas de heartbeat ao serviço de referência.
 
-No projeto, o heartbeat é enviado a cada 10 mensagens de clientes recebidas pelo servidor. Ao receber o heartbeat, o serviço de referência:
+No projeto, o heartbeat é enviado periodicamente com base no número de mensagens tratadas pelo servidor. Ao receber o heartbeat, o serviço de referência:
 - confirma que o servidor continua ativo;
 - atualiza o último instante em que aquele servidor foi visto;
-- devolve uma resposta com status e com a hora de referência.
+- mantém a lista de servidores disponíveis atualizada.
 
 Caso um servidor deixe de enviar heartbeat dentro do intervalo configurado, ele é removido da lista de servidores disponíveis.
 
 ### 3.10. Sincronização do relógio físico
-A sincronização do relógio físico foi implementada apenas nos servidores, conforme pedido no enunciado.
+Na Parte 4, a sincronização do relógio físico deixou de depender do serviço de referência e passou a usar um **servidor coordenador**.
 
-Em vez de alterar o relógio do sistema operacional do container, cada servidor mantém um **offset** local. Quando recebe a hora de referência no reply do heartbeat:
-- compara essa hora com seu horário local;
-- recalcula o offset;
-- passa a usar esse ajuste para gerar o horário sincronizado da aplicação.
+O sistema mantém:
+- uma variável com o nome do coordenador;
+- uma lógica de eleição entre servidores;
+- um fluxo de sincronização em que os servidores seguidores solicitam a hora ao coordenador.
+
+Quando o coordenador deixa de responder:
+- os servidores iniciam nova eleição;
+- o novo coordenador é anunciado internamente;
+- os demais passam a sincronizar o relógio a partir dele.
+
+### 3.11. Replicação de estado
+Na Parte 5, os servidores passaram a replicar:
+- logins;
+- canais;
+- publicações.
+
+Além da replicação por eventos, também foi adicionada uma sincronização completa de estado na inicialização do servidor, permitindo reconstruir localmente informações que já existiam em outros nós.
 
 ---
 
@@ -212,6 +267,8 @@ Em vez de alterar o relógio do sistema operacional do container, cada servidor 
 - **Persistência:** logins, canais e publicações ficam armazenados em disco no arquivo local de cada servidor.
 - **Relógio lógico:** toda mensagem deve carregar o valor do contador lógico do emissor.
 - **Heartbeat:** o servidor deve permanecer enviando heartbeat para continuar listado como disponível.
+- **Replicação:** toda alteração persistente importante deve ser propagada para os demais servidores.
+- **Idempotência:** eventos replicados não devem ser aplicados duas vezes.
 
 ---
 
@@ -233,11 +290,15 @@ Na Parte 2, esse comportamento foi ampliado. Ao iniciar, cada bot:
 6. escolhe um canal disponível;
 7. envia 10 mensagens automáticas com intervalo de 1 segundo entre elas.
 
-Na Parte 3, esse comportamento funcional foi mantido, mas agora todas as trocas de mensagens também incluem o relógio lógico.
+Nas Partes 3, 4 e 5, esse comportamento funcional foi mantido, mas o sistema passou a operar com:
+- relógio lógico;
+- heartbeat;
+- coordenador para sincronização de relógio;
+- replicação de estado entre servidores.
 
 Além disso, o cliente permanece ouvindo continuamente os canais assinados para exibir no terminal as mensagens recebidas.
 
-Esse comportamento contínuo está de acordo com o enunciado das Partes 2 e 3.
+Esse comportamento contínuo está de acordo com o enunciado das partes do trabalho.
 
 ---
 
@@ -249,13 +310,15 @@ Esse fluxo é usado para:
 - listagem de canais;
 - criação de canais;
 - solicitação de publicação;
-- comunicação entre servidores e serviço de referência.
+- comunicação entre servidores e serviço de referência;
+- comunicação interna entre servidores para eleição, sincronização de relógio e sincronização de estado.
 
 ### 6.2. Pub/Sub
 Esse fluxo é usado para:
 - distribuir mensagens publicadas nos canais;
 - permitir que clientes inscritos recebam essas mensagens;
-- propagar eventos internos de replicação de canais entre servidores, em tópico reservado.
+- propagar eventos internos de replicação entre servidores;
+- anunciar coordenador no tópico interno `servers`.
 
 O nome do canal é utilizado como **tópico** da mensagem Pub/Sub.
 
@@ -267,14 +330,18 @@ Cada servidor possui seu próprio arquivo `state.json`, armazenado em volume Doc
 Nesse arquivo são mantidos:
 - `logins`;
 - `channels`;
-- `publications`.
+- `publications`;
+- `replication_ids`.
 
 As publicações armazenadas incluem pelo menos:
 - canal;
 - remetente;
 - texto;
-- timestamp;
+- timestamp original;
+- timestamp de persistência;
 - servidor responsável pelo processamento.
+
+A presença dos `replication_ids` permite evitar duplicidade na aplicação de eventos replicados.
 
 Essa estrutura permite recuperar as informações futuramente, conforme exigido no trabalho.
 
@@ -289,7 +356,7 @@ Os logs mostram:
 - inicialização do serviço de referência;
 - login dos bots;
 - listagem e criação de canais;
-- replicação de canais entre servidores;
+- replicação de canais, logins e publicações entre servidores;
 - inscrições em canais;
 - publicações enviadas pelos clientes;
 - respostas dos servidores;
@@ -297,6 +364,9 @@ Os logs mostram:
 - rank atribuído aos servidores;
 - heartbeat enviado e recebido;
 - lista de servidores disponíveis;
+- eleição de coordenador;
+- sincronização de relógio;
+- sincronização de estado no startup;
 - valores de relógio lógico nas mensagens.
 
 Isso facilita a validação do funcionamento distribuído do projeto.
@@ -327,7 +397,7 @@ docker compose up --build
 A aplicação sobe os seguintes containers:
 - `broker`: broker do fluxo Req/Rep;
 - `pubsub`: proxy do fluxo Pub/Sub;
-- `reference`: serviço de referência da Parte 3;
+- `reference`: serviço de referência;
 - `server1`: primeiro servidor Python;
 - `server2`: segundo servidor Python;
 - `client_alfa`: primeiro bot cliente Java;
@@ -348,7 +418,10 @@ A Parte 3 adicionou mecanismos de controle de tempo e disponibilidade, incluindo
 - relógio lógico nos processos e nas mensagens;
 - heartbeat;
 - rank dos servidores;
-- lista de servidores disponíveis;
-- sincronização do relógio físico dos servidores em nível de aplicação.
+- lista de servidores disponíveis.
 
-Com isso, o projeto passa a atender aos requisitos centrais das três etapas propostas no trabalho, mantendo a comunicação distribuída entre múltiplos processos e a execução automatizada por bots.
+A Parte 4 modificou a sincronização do relógio físico, passando a utilizar um servidor coordenador eleito entre os próprios servidores.
+
+Por fim, a Parte 5 resolveu o problema de consistência do histórico entre os servidores, implementando replicação de dados e sincronização de estado.
+
+Com isso, o projeto atende aos requisitos centrais das cinco etapas propostas no trabalho, mantendo a comunicação distribuída entre múltiplos processos, a execução automatizada por bots e a replicação do histórico entre todos os servidores.
